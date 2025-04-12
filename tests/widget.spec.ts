@@ -1,48 +1,78 @@
 import { test, expect } from '@playwright/test';
 import { WidgetPage } from "./widget.page";
 
+// Конфигурационные константы
+const TEST_CONFIG = {
+    BASE_URL: 'https://uchi.ru/',
+    COOKIE_BUTTON_SELECTOR: '._UCHI_COOKIE__button',
+    EXPECTED_TITLE: /Связь с поддержкой/i,
+    TIMEOUTS: {
+        NETWORK: 15000,
+        ELEMENT_VISIBLE: 10000,
+        ELEMENT_HIDDEN: 5000,
+        ASSERTION: 10000
+    }
+};
+
 test.describe('Uchi.ru Widget Tests', () => {
-  let widgetPage: WidgetPage;
-  const COOKIE_BUTTON_SELECTOR = '._UCHI_COOKIE__button';
+    let widgetPage: WidgetPage;
 
-  test.beforeEach(async ({ page }) => {
-    widgetPage = new WidgetPage(page);
+    test.beforeEach(async ({ page }) => {
+        widgetPage = new WidgetPage(page);
 
-    // Открываем главную страницу с ожиданием полной загрузки
-    await page.goto('https://uchi.ru/', { waitUntil: 'networkidle' });
+        // Навигация с обработкой возможных ошибок
+        await page.goto(TEST_CONFIG.BASE_URL, {
+            waitUntil: 'domcontentloaded',
+            timeout: TEST_CONFIG.TIMEOUTS.NETWORK
+        });
 
-    // Надежное закрытие попапа cookies
-    const cookieButton = page.locator(COOKIE_BUTTON_SELECTOR);
-    await cookieButton.waitFor({ state: 'visible', timeout: 10000 });
-    await cookieButton.click();
-    await cookieButton.waitFor({ state: 'hidden', timeout: 5000 });
-  });
-
-  test('Widget should open successfully', async () => {
-    await widgetPage.openWidget();
-    await expect(widgetPage.getWidgetBody()).toBeVisible({ timeout: 15000 });
-  });
-
-  test('Support contact form should display correct title', async () => {
-    await widgetPage.openWidget();
-
-    // Проверяем наличие статей
-    const articles = await widgetPage.getPopularArticles();
-    await expect(articles).not.toHaveCount(0, {
-      message: 'Expected at least one article to be present'
+        // Универсальная обработка cookie-попапа
+        await handleCookiePopup(page);
     });
 
-    // Кликаем на первую статью с ожиданием
-    await articles.first().click();
-    await widgetPage.page.waitForLoadState('networkidle');
+    test('Widget should open successfully', async () => {
+        await widgetPage.openWidget();
 
-    // Открываем форму обратной связи
-    await widgetPage.clickWriteToUs();
+        await expect(widgetPage.getWidgetBody(), 'Widget body should be visible')
+            .toBeVisible({ timeout: TEST_CONFIG.TIMEOUTS.ASSERTION });
+    });
 
-    // Проверяем заголовок с учетом регистра и возможных пробелов
-    await expect(widgetPage.getTitle()).toHaveText(
-      /Связь с поддержкой/i,
-      { timeout: 10000 }
-    );
-  });
+    test('Support contact form should display correct title', async ({ page }) => {
+        await widgetPage.openWidget();
+
+        // Проверка и взаимодействие со статьями
+        const articles = await widgetPage.getPopularArticles();
+        await expect(articles, 'Should have at least one article')
+            .toHaveCountGreaterThan(0);
+
+        // Работа со статьей через Page Object
+        await widgetPage.openFirstArticle();
+        await widgetPage.openContactForm();
+
+        // Проверка заголовка с нормализацией текста
+        const titleText = await widgetPage.getTitle();
+        await expect(titleText.trim().toLowerCase())
+            .toMatch(TEST_CONFIG.EXPECTED_TITLE);
+    });
+
+    // Вспомогательная функция для обработки cookie-попапа
+    async function handleCookiePopup(page: Page) {
+        const cookiePopup = page.locator(TEST_CONFIG.COOKIE_BUTTON_SELECTOR);
+
+        try {
+            // Мягкая проверка с сокращенным таймаутом
+            await cookiePopup.waitFor({
+                state: 'visible',
+                timeout: TEST_CONFIG.TIMEOUTS.ELEMENT_VISIBLE / 2
+            });
+
+            await cookiePopup.click();
+            await cookiePopup.waitFor({
+                state: 'hidden',
+                timeout: TEST_CONFIG.TIMEOUTS.ELEMENT_HIDDEN
+            });
+        } catch (e) {
+            console.log('Cookie popup not found, continuing test');
+        }
+    }
 });
